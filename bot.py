@@ -494,7 +494,7 @@ async def qrtype_cb(_, cq):
     await cq.message.edit_text(prompts.get(qrtype,"Send input:"))
 
 
-@app.on_message(filters.private & ~filters.edited_message)
+@app.on_message(filters.private)
 async def private_flow_handler(_, msg: Message):
     uid = msg.from_user.id
     if uid not in INTERACTIVE:
