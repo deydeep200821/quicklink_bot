@@ -647,6 +647,12 @@ async def qrtype_cb(_, cq):
     await cq.message.edit_text(prompts.get(qrtype, "Send input:"))
 
 
+# We must define all commands here to exclude them from the private message handler
+ALL_COMMANDS = [
+    "start", "state", "chat", "admin", "broadcast", 
+    "qrgen", "qrscan", "shortner", "owner"
+]
+
 @app.on_message(filters.private & ~filters.command(ALL_COMMANDS)) # Catches all non-command messages
 async def private_flow_handler(_, msg: Message):
     uid = msg.from_user.id
@@ -1072,6 +1078,7 @@ if __name__ == "__main__":
         print("Bot stopped manually.")
     except Exception as e:
         print(f"Main loop crashed: {e}")
+
 
 
 
