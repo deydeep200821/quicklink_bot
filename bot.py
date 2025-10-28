@@ -9,8 +9,10 @@
 # bot.py
 # Single-file Pyrogram bot — QR gen/scan, URL shortener, admin controls, ChatBase chat, web status.
 # Uses MongoDB (db: quicklink_bot) if provided, else falls back to local JSON storage.
-from flask import Flask, request
-import requests
+# bot.py
+# Single-file Pyrogram bot — QR gen/scan, URL shortener, admin controls, ChatBase chat, web status.
+# Uses MongoDB (db: quicklink_bot) if provided, else falls back to local JSON storage.
+import requests # Removed conflicting Flask import
 import os
 import io
 import json
@@ -47,7 +49,8 @@ API_HASH = os.getenv("TG_API_HASH")
 QUICKLINK_API_KEY = os.getenv("QUICKLINK_API_KEY")
 QUICKLINK_ENDPOINT = os.getenv("QUICKLINK_ENDPOINT", "https://quick-link-url-shortener.vercel.app/api/v1/st")
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
-PORT = int(os.getenv("PORT", "8080"))
+# Use PORT 10000 as default, which Render provides
+PORT = int(os.getenv("PORT", "10000"))
 MONGO_URI = os.getenv("MONGO_URI")  # if provided, use mongo
 CHATBASE_API_KEY = os.getenv("CHATBASE_API_KEY")
 CHATBASE_BOT_ID = os.getenv("CHATBASE_BOT_ID")
@@ -56,26 +59,9 @@ if not BOT_TOKEN or not OWNER_ID:
     raise RuntimeError("Set TG_BOT_TOKEN and OWNER_ID in .env")
 
 # -------------------------
-# Flask for uptime & webhook
+# Removed Conflicting Flask Webhook Section
+# Your aiohttp server (at the bottom) will handle Render's health checks.
 # -------------------------
-from flask import Flask, request
-
-flask_app = Flask(__name__)
-
-@flask_app.route('/')
-def home():
-    return "✅ QuickLink Bot is alive!", 200
-
-@flask_app.route(f"/{BOT_TOKEN}", methods=["POST"])
-def webhook():
-    update = request.get_json()
-    if update:
-        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-            "chat_id": OWNER_ID,
-            "text": "📩 Webhook received an update!"
-        })
-    return '', 200
-
 
 # -------------------------
 # Storage: prefer MongoDB (db=quicklink_bot), fallback to local JSON in temp
@@ -517,18 +503,28 @@ async def qrtype_cb(_, cq):
     await cq.message.edit_text(prompts.get(qrtype,"Send input:"))
 
 
-@app.on_message(filters.private)
+@app.on_message(filters.private & ~filters.command(["start", "state", "chat", "admin", "broadcast", "qrgen", "qrscan", "shorten"]))
 async def private_flow_handler(_, msg: Message):
     uid = msg.from_user.id
     if uid not in INTERACTIVE:
+        # If not in an interactive flow, you might want to send a default reply
+        await msg.reply_text("I'm not sure what you mean. Try /start to see available commands.")
         return
-    state = INTERACTIVE[uid]
+    
+    state = INTERACTIVE.get(uid)
+    if not state:
+        return # Should be covered by the check above, but as a safeguard
+
     if state.get("flow") == "qrgen":
         await handle_qrgen_step(msg, state)
     elif state.get("flow") == "shorten":
         await handle_shorten_step(msg, state)
     elif state.get("flow") == "qrscan_wait":
         state["file_msg"] = msg
+        # Note: qrscan_wait logic is handled in qrscan_start, this might not be hit
+        # The `app.listen` in `qrscan_start` captures the message, not this handler.
+        # This handler is for messages *after* a command has set a state.
+        pass
 
 
 async def handle_qrgen_step(msg: Message, state: Dict):
@@ -538,9 +534,12 @@ async def handle_qrgen_step(msg: Message, state: Dict):
         if "content" not in d:
             d["content"] = msg.text or ""
             qr_text = d["content"].strip()
+            if not qr_text:
+                await msg.reply_text("Please send valid text/link.")
+                return
             png = build_qr_png_bytes(qr_text, size=1000)
             await msg.reply_photo(png, caption=f"Type:{typ}\nEncoded:`{qr_text}`")
-            inc_stat_db("qrgen"); push_short_url_db("")  # only bump stat; last_urls unchanged
+            inc_stat_db("qrgen");
             return INTERACTIVE.pop(uid, None)
     if typ == "wifi":
         if "ssid" not in d:
@@ -613,18 +612,24 @@ async def qrscan_start(_, msg: Message):
     uid = msg.from_user.id; INTERACTIVE[uid] = {"flow":"qrscan_wait"}
     prompt = await msg.reply_text("📸 Send QR image within 60s. I'll try local decode first.")
     try:
-        got = await app.listen(chat_id=msg.chat.id, timeout=60)
+        # We use app.listen to wait for the *next* message in this chat
+        got = await app.listen(chat_id=msg.chat.id, timeout=60, filters=filters.photo | filters.document)
     except asyncio.TimeoutError:
         INTERACTIVE.pop(uid, None); return await prompt.edit_text("⏰ Timeout — no image.")
-    if not (got.photo or got.document):
-        INTERACTIVE.pop(uid, None); return await prompt.edit_text("No image.")
+    
+    # Check if the received message is actually a photo or document
+    if not (got.photo or (got.document and got.document.mime_type and "image" in got.document.mime_type)):
+        INTERACTIVE.pop(uid, None); return await prompt.edit_text("That's not an image. Scan cancelled. Try /qrscan again.")
+
     fpath = temp_path_for("qrscan",".png"); await got.download(file_name=fpath)
     await prompt.edit_text("🔎 Scanning locally...")
     loop = asyncio.get_event_loop()
     local_res = await loop.run_in_executor(None, partial(local_scan_qr, fpath))
-    inc_stat_db("qrscan"); save_storage_local(LOCAL)
+    inc_stat_db("qrscan") # Removed save_storage_local(LOCAL), inc_stat_db handles it
+    
     if local_res:
         INTERACTIVE.pop(uid, None); await prompt.edit_text(f"✅ Local decode:\n`{chr(10).join(local_res)}`"); asyncio.create_task(schedule_delete(fpath,delay=300)); return
+    
     # fallback offer
     INTERACTIVE[uid]["pending_file"] = fpath
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("✅ Yes — external (api.qrserver.com)", callback_data="qrfb|yes")],
@@ -645,8 +650,8 @@ async def qrfallback_cb(_, cq):
             os.remove(fpath)
         except Exception:
             pass
- 
-        except: pass; return await cq.message.edit_text("Cancelled.")
+        return await cq.message.edit_text("Cancelled.")
+    
     await cq.message.edit_text("🔁 External decoding...")
     loop = asyncio.get_event_loop()
     res = await loop.run_in_executor(None, partial(fallback_scan_qr_api, fpath))
@@ -670,7 +675,7 @@ async def handle_shorten_step(msg: Message, state: Dict):
     uid = msg.from_user.id; st = state.get("state")
     if st == "wait_url":
         text = (msg.text or "").strip()
-        if not text.startswith("http"): await msg.reply_text("Send valid URL."); return
+        if not text.startswith("http"): await msg.reply_text("Send valid URL (must start with http or https)."); return
         state["long_url"] = text; state["state"] = "wait_alias"
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("Skip (random)", callback_data="alias|skip")]])
         await msg.reply_text("Optional: send alias or press Skip", reply_markup=kb); return
@@ -680,8 +685,11 @@ async def handle_shorten_step(msg: Message, state: Dict):
         await msg.reply_text("🔧 Shortening...")
         loop = asyncio.get_event_loop()
         res = await loop.run_in_executor(None, partial(quicklink_shorten, state["long_url"], alias_text))
-        inc_stat_db("shorten"); push_short_url_db(res.get("shortenedUrl") or res.get("shortUrl") or "")
-        if res.get("status") == "success": await msg.reply_text(f"✅ Shortened:\n{res.get('shortenedUrl') or res.get('shortUrl')}")
+        short_url = res.get("shortenedUrl") or res.get("shortUrl") or ""
+        if short_url:
+            inc_stat_db("shorten"); push_short_url_db(short_url)
+        
+        if res.get("status") == "success": await msg.reply_text(f"✅ Shortened:\n{short_url}")
         else: await msg.reply_text(f"❌ Error: {res.get('message','Unknown')}")
         INTERACTIVE.pop(uid, None)
 
@@ -696,14 +704,19 @@ async def alias_cb(_, cq):
         await cq.message.edit_text("🔧 Shortening random alias...")
         loop = asyncio.get_event_loop()
         res = await loop.run_in_executor(None, partial(quicklink_shorten, state["long_url"], ""))
-        inc_stat_db("shorten"); push_short_url_db(res.get("shortenedUrl") or res.get("shortUrl") or "")
-        if res.get("status")=="success": await cq.message.edit_text(f"✅ Shortened:\n{res.get('shortenedUrl') or res.get('shortUrl')}")
+        
+        short_url = res.get("shortenedUrl") or res.get("shortUrl") or ""
+        if short_url:
+            inc_stat_db("shorten"); push_short_url_db(short_url)
+
+        if res.get("status")=="success": await cq.message.edit_text(f"✅ ShortSened:\n{short_url}")
         else: await cq.message.edit_text(f"❌ Error: {res.get('message','Unknown')}")
         INTERACTIVE.pop(uid, None)
 
 
 # -------------------------
 # Small web server for uptime Ping (aiohttp)
+# This is required for Render's free plan.
 # -------------------------
 async def web_index(request):
     # today 16:00 IST last deploy
@@ -734,8 +747,10 @@ async def run_web():
     app_web.add_routes([web.get('/', web_index)])
     runner = web.AppRunner(app_web)
     await runner.setup()
+    # Binds to 0.0.0.0 and the PORT from env var
     site = web.TCPSite(runner, '0.0.0.0', PORT)
     await site.start()
+    print(f"Web server started on port {PORT}...")
 
 
 # -------------------------
@@ -752,20 +767,22 @@ async def main():
     else:
         save_storage_local(LOCAL)
 
-    await run_web()
-    await app.start()
-    print("Bot and web server started. Uptime:", uptime_str())
+    # Start the web server *and* the bot concurrently
+    await asyncio.gather(
+        run_web(),
+        app.start()
+    )
+    
+    print(f"Bot started. Uptime: {uptime_str()}")
+    # Keep the script running
     await asyncio.Event().wait()
 
 
 if __name__ == "__main__":
-    import threading
-
-    def run_pyrogram():
+    # This is the correct way to run the async main function
+    # It will start the web server and the bot client in the same async loop
+    try:
+        print("Starting bot and web server...")
         asyncio.run(main())
-
-    threading.Thread(target=run_pyrogram).start()
-
-    port = int(os.environ.get("PORT", 10000))
-    flask_app.run(host="0.0.0.0", port=port)
-
+    except KeyboardInterrupt:
+        print("Bot stopped manually.")
