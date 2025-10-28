@@ -24,6 +24,7 @@ from typing import Dict, Any, List, Optional
 import random
 
 from dotenv import load_dotenv
+load_dotenv("/etc/secrets/.env")
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 import qrcode
