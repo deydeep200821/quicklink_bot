@@ -9,7 +9,8 @@
 # bot.py
 # Single-file Pyrogram bot — QR gen/scan, URL shortener, admin controls, ChatBase chat, web status.
 # Uses MongoDB (db: quicklink_bot) if provided, else falls back to local JSON storage.
-
+from flask import Flask, request
+import requests
 import os
 import io
 import json
@@ -53,6 +54,28 @@ CHATBASE_BOT_ID = os.getenv("CHATBASE_BOT_ID")
 
 if not BOT_TOKEN or not OWNER_ID:
     raise RuntimeError("Set TG_BOT_TOKEN and OWNER_ID in .env")
+
+# -------------------------
+# Flask for uptime & webhook
+# -------------------------
+from flask import Flask, request
+
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+def home():
+    return "✅ QuickLink Bot is alive!", 200
+
+@flask_app.route(f"/{BOT_TOKEN}", methods=["POST"])
+def webhook():
+    update = request.get_json()
+    if update:
+        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
+            "chat_id": OWNER_ID,
+            "text": "📩 Webhook received an update!"
+        })
+    return '', 200
+
 
 # -------------------------
 # Storage: prefer MongoDB (db=quicklink_bot), fallback to local JSON in temp
@@ -736,7 +759,13 @@ async def main():
 
 
 if __name__ == "__main__":
-    try:
+    import threading
+
+    def run_pyrogram():
         asyncio.run(main())
-    except KeyboardInterrupt:
-        print("Stopping...")
+
+    threading.Thread(target=run_pyrogram).start()
+
+    port = int(os.environ.get("PORT", 10000))
+    flask_app.run(host="0.0.0.0", port=port)
+
