@@ -2,6 +2,10 @@
 # Pyrogram Telegram bot — interactive QR gen/scan + URL shortener (button-driven)
 # Requirements: pyrogram, tgcrypto, pillow, qrcode, requests, python-dotenv, pyzbar
 
+# bot.py
+# Pyrogram Telegram bot — interactive QR gen/scan + URL shortener (button-driven)
+# Requirements: pyrogram, tgcrypto, pillow, qrcode, requests, python-dotenv, pyzbar
+
 import os
 import io
 import asyncio
@@ -437,4 +441,3 @@ async def alias_cb(_, cq):
 if __name__ == "__main__":
     print("Bot starting...")
     app.run()
-
