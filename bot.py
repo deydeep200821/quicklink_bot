@@ -642,13 +642,13 @@ async def qrtype_cb(_, cq):
         "email": "Enter the 'To' Email Address:",
         "phone": "Enter the Phone Number (with country code, e.g., +123456...):",
         "whatsapp": "Enter the WhatsApp Number (with country code, no +):",
-        "upi": "Enter the UPI ID (e.g., user@bank):",
-        "message": "Enter the recipient Phone Number for the SMS:"
-    }
-    await cq.message.edit_text(f"*{qrtype.title()} QR Code*\n\n{prompts.get(qrtype,'Send input:')}")
+# We must define all commands here to exclude them from the private message handler
+ALL_COMMANDS = [
+    "start", "state", "chat", "admin", "broadcast", 
+    "qrgen", "qrscan", "shortner", "owner"
+]
 
-
-@app.on_message(filters.private & ~filters.command()) # Catches all non-command messages
+@app.on_message(filters.private & ~filters.command(ALL_COMMANDS)) # Catches all non-command messages
 async def private_flow_handler(_, msg: Message):
     uid = msg.from_user.id
     if uid not in INTERACTIVE:
@@ -1073,4 +1073,5 @@ if __name__ == "__main__":
         print("Bot stopped manually.")
     except Exception as e:
         print(f"Main loop crashed: {e}")
+
 
