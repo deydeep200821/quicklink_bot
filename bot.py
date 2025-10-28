@@ -12,7 +12,10 @@
 # bot.py
 # Single-file Pyrogram bot — QR gen/scan, URL shortener, admin controls, ChatBase chat, web status.
 # Uses MongoDB (db: quicklink_bot) if provided, else falls back to local JSON storage.
-import requests # Removed conflicting Flask import
+# bot.py
+# Single-file Pyrogram bot — QR gen/scan, URL shortener, admin controls, ChatBase chat, web status.
+# Uses MongoDB (db: quicklink_bot) if provided, else falls back to local JSON storage.
+import requests
 import os
 import io
 import json
@@ -27,7 +30,7 @@ from typing import Dict, Any, List, Optional
 import random
 
 from dotenv import load_dotenv
-load_dotenv("/etc/secrets/.env")
+load_dotenv("/etc/secrets/.env") # Load .env file if it exists
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 import qrcode
@@ -44,24 +47,23 @@ from pyrogram.errors import FloodWait
 # -------------------------
 load_dotenv()
 BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
-API_ID = int(os.getenv("TG_API_ID", "0") or 0)
+
+# --- MODIFIED: Handle missing API_ID/HASH ---
+# We load them as strings first to check if they exist
+API_ID_STR = os.getenv("TG_API_ID")
 API_HASH = os.getenv("TG_API_HASH")
+# --- End Modification ---
+
 QUICKLINK_API_KEY = os.getenv("QUICKLINK_API_KEY")
 QUICKLINK_ENDPOINT = os.getenv("QUICKLINK_ENDPOINT", "https://quick-link-url-shortener.vercel.app/api/v1/st")
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
-# Use PORT 10000 as default, which Render provides
-PORT = int(os.getenv("PORT", "10000"))
+PORT = int(os.getenv("PORT", "10000")) # Use 10000 as default
 MONGO_URI = os.getenv("MONGO_URI")  # if provided, use mongo
 CHATBASE_API_KEY = os.getenv("CHATBASE_API_KEY")
 CHATBASE_BOT_ID = os.getenv("CHATBASE_BOT_ID")
 
 if not BOT_TOKEN or not OWNER_ID:
     raise RuntimeError("Set TG_BOT_TOKEN and OWNER_ID in .env")
-
-# -------------------------
-# Removed Conflicting Flask Webhook Section
-# Your aiohttp server (at the bottom) will handle Render's health checks.
-# -------------------------
 
 # -------------------------
 # Storage: prefer MongoDB (db=quicklink_bot), fallback to local JSON in temp
@@ -296,8 +298,26 @@ def chatbase_query(user_text: str) -> str:
 
 # -------------------------
 # Pyrogram client
+# --- MODIFIED: Smart Client Initialization ---
 # -------------------------
-app = Client("quicklink_bot", bot_token=BOT_TOKEN, api_id=API_ID or None, api_hash=API_HASH or None)
+
+# Initialize Pyrogram Client
+if API_ID_STR and API_HASH:
+    print("Initializing Pyrogram with API_ID and API_HASH.")
+    app = Client(
+        "quicklink_bot",
+        bot_token=BOT_TOKEN,
+        api_id=int(API_ID_STR),
+        api_hash=API_HASH
+    )
+else:
+    print("Initializing Pyrogram with bot_token only (API_ID/API_HASH not found).")
+    app = Client(
+        "quicklink_bot",
+        bot_token=BOT_TOKEN
+    )
+# --- End Modification ---
+
 
 INTERACTIVE: Dict[int, Dict[str, Any]] = {}
 
@@ -503,7 +523,7 @@ async def qrtype_cb(_, cq):
     await cq.message.edit_text(prompts.get(qrtype,"Send input:"))
 
 
-@app.on_message(filters.private & ~filters.command(["start", "state", "chat", "admin", "broadcast", "qrgen", "qrscan", "shorten"]))
+@app.on_message(filters.private & ~filters.command(["start", "state", "chat", "admin", "broadcast", "qrgen", "qrscan", "shorten", "owner"]))
 async def private_flow_handler(_, msg: Message):
     uid = msg.from_user.id
     if uid not in INTERACTIVE:
@@ -625,7 +645,7 @@ async def qrscan_start(_, msg: Message):
     await prompt.edit_text("🔎 Scanning locally...")
     loop = asyncio.get_event_loop()
     local_res = await loop.run_in_executor(None, partial(local_scan_qr, fpath))
-    inc_stat_db("qrscan") # Removed save_storage_local(LOCAL), inc_stat_db handles it
+    inc_stat_db("qrscan")
     
     if local_res:
         INTERACTIVE.pop(uid, None); await prompt.edit_text(f"✅ Local decode:\n`{chr(10).join(local_res)}`"); asyncio.create_task(schedule_delete(fpath,delay=300)); return
@@ -709,9 +729,22 @@ async def alias_cb(_, cq):
         if short_url:
             inc_stat_db("shorten"); push_short_url_db(short_url)
 
-        if res.get("status")=="success": await cq.message.edit_text(f"✅ ShortSened:\n{short_url}")
+        if res.get("status")=="success": await cq.message.edit_text(f"✅ Shortened:\n{short_url}")
         else: await cq.message.edit_text(f"❌ Error: {res.get('message','Unknown')}")
         INTERACTIVE.pop(uid, None)
+
+# ---------- /owner ----------
+@app.on_message(filters.command("owner"))
+async def owner_cmd(_, msg: Message):
+    register_user_db(msg.from_user.id)
+    kb = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("Instagram", url="https://instagram.com/deepdey.official")],
+            [InlineKeyboardButton("Telegram", url="https://t.me/deepdeyiit")],
+            [InlineKeyboardButton("GitHub", url="https://github.com/deepdey")]
+        ]
+    )
+    await msg.reply_text("Info about my owner:", reply_markup=kb)
 
 
 # -------------------------
@@ -731,9 +764,10 @@ async def web_index(request):
     html = f"""
     <html><head><title>QuickLink Bot Status</title></head><body style="font-family:Arial;background:#011627;color:#e6eef8;padding:20px;">
       <h2>QuickLink Bot — Status</h2>
+      <p>Status: ✅ Bot is running</p>
       <p>Uptime: {up}</p>
       <p>Shortens: {stats.get('shorten',0)} | QRGen: {stats.get('qrgen',0)} | QRScan: {stats.get('qrscan',0)}</p>
-      <p>Last deploy (today 16:00 IST): {last_deploy.strftime('%Y-%m-%d %H:%M:%S')}</p>
+      <p>Last deploy (today 16:00 IST): {last_deploy.strftime('%Y-%m-d %H:%M:%S')}</p>
       <p>Contact: <a href="https://instagram.com/deepdey.official" target="_blank">@deepdey.official</a></p>
       <p>Owner: <a href="https://t.me/deepdeyiit" target="_blank">@deepdeyiit</a></p>
       <h3>Last 5 Shortened URLs</h3><p>{last5_html}</p>
@@ -749,8 +783,13 @@ async def run_web():
     await runner.setup()
     # Binds to 0.0.0.0 and the PORT from env var
     site = web.TCPSite(runner, '0.0.0.0', PORT)
-    await site.start()
-    print(f"Web server started on port {PORT}...")
+    try:
+        await site.start()
+        print(f"Web server started successfully on port {PORT}.")
+    except Exception as e:
+        print(f"Error starting web server on port {PORT}: {e}")
+        # Optionally, you might want to stop the bot if the web server fails
+        # await app.stop() 
 
 
 # -------------------------
@@ -768,6 +807,7 @@ async def main():
         save_storage_local(LOCAL)
 
     # Start the web server *and* the bot concurrently
+    print("Starting web server and Pyrogram bot...")
     await asyncio.gather(
         run_web(),
         app.start()
@@ -782,7 +822,9 @@ if __name__ == "__main__":
     # This is the correct way to run the async main function
     # It will start the web server and the bot client in the same async loop
     try:
-        print("Starting bot and web server...")
         asyncio.run(main())
     except KeyboardInterrupt:
         print("Bot stopped manually.")
+    except Exception as e:
+        print(f"Main loop crashed: {e}")
+
