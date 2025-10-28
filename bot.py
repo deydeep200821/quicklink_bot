@@ -633,20 +633,19 @@ async def qrtype_cb(_, cq):
     
     INTERACTIVE[user_id] = {"flow":"qrgen", "type": qrtype, "data": {}}
     await cq.answer()
-    
-    # Prompts based on your feature list
+    # This dictionary was not closed properly. Here is the corrected version.
     prompts = {
-        "text": "Enter the text you want to encode:",
-        "link": "Enter the website link (e.g., https://google.com):",
-        "wifi": "Enter the Network Name (SSID):",
-        "email": "Enter the 'To' Email Address:",
-        "phone": "Enter the Phone Number (with country code, e.g., +123456...):",
-        "whatsapp": "Enter the WhatsApp Number (with country code, no +):",
-# We must define all commands here to exclude them from the private message handler
-ALL_COMMANDS = [
-    "start", "state", "chat", "admin", "broadcast", 
-    "qrgen", "qrscan", "shortner", "owner"
-]
+        "text": "Send text:",
+        "link": "Send link (https://...)",
+        "wifi": "Send SSID",
+        "email": "Send 'To' email",
+        "phone": "Send phone (+country)",
+        "whatsapp": "Send phone (no +)",
+        "upi": "Send UPI ID",
+        "message": "Send phone for SMS"
+    }
+    await cq.message.edit_text(prompts.get(qrtype, "Send input:"))
+
 
 @app.on_message(filters.private & ~filters.command(ALL_COMMANDS)) # Catches all non-command messages
 async def private_flow_handler(_, msg: Message):
@@ -1073,5 +1072,6 @@ if __name__ == "__main__":
         print("Bot stopped manually.")
     except Exception as e:
         print(f"Main loop crashed: {e}")
+
 
 
