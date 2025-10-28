@@ -616,7 +616,12 @@ async def qrfallback_cb(_, cq):
     if not st or "pending_file" not in st: return await cq.message.edit_text("Session expired.")
     fpath = st["pending_file"]
     if action == "no":
-        INTERACTIVE.pop(uid, None); try: os.remove(fpath) 
+        INTERACTIVE.pop(uid, None)
+        try:
+            os.remove(fpath)
+        except Exception:
+            pass
+ 
         except: pass; return await cq.message.edit_text("Cancelled.")
     await cq.message.edit_text("🔁 External decoding...")
     loop = asyncio.get_event_loop()
